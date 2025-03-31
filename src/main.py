@@ -1,5 +1,7 @@
 import random
 import flet as ft
+import time
+import threading
 
 
 def main(page: ft.Page):
@@ -9,29 +11,10 @@ def main(page: ft.Page):
     page.spacing = 20
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
 
-    def handle_pause(e):
-        video.pause()
-        print("Video.pause()")
-
-    def handle_play_or_pause(e):
-        video.play_or_pause()
-        print("Video.play_or_pause()")
-
-    def handle_play(e):
-        video.play()
-        print("Video.play()")
-
-    def handle_stop(e):
-        video.stop()
-        print("Video.stop()")
-
-    def handle_next(e):
-        video.next()
-        print("Video.next()")
-
-    def handle_previous(e):
-        video.previous()
-        print("Video.previous()")
+    # Variable to control the timer loop
+    timer_active = True
+    timer = None
+    is_playing = False
 
     def handle_volume_change(e):
         video.volume = e.control.value
@@ -43,28 +26,133 @@ def main(page: ft.Page):
         page.update()
         print(f"Video.playback_rate = {e.control.value}")
 
-    def handle_seek(e):
-        video.seek(10000)
-        print(f"Video.seek(10000)")
-
-    def handle_add_media(e):
-        video.playlist_add(random.choice(sample_media))
-        print(f"Video.playlist_add(random.choice(sample_media))")
-
-    def handle_remove_media(e):
-        r = random.randint(0, len(video.playlist) - 1) # type: ignore
-        video.playlist_remove(r)
-        print(f"Popped Item at index: {r} (position {r+1})")
-
-    def handle_jump(e):
-        print(f"Video.jump_to(0)")
-        video.jump_to(0)
+    def update_video_progress_bar(e=None):
+        nonlocal timer_active, timer
+        
+        if not timer_active:
+            return
+            
+        current_position = video.get_current_position() or 0
+        total_duration = video.get_duration() or 1  # Avoid division by zero
+        
+        # Update the progress bar value
+        if total_duration > 0:
+            progress_slider.value = current_position / total_duration
+            
+        # Update time labels
+        current_time = format_time(current_position)
+        total_time = format_time(total_duration)
+        time_display.value = f"{current_time} / {total_time}"
+        
+        # Schedule next update using threading.Timer
+        page.update()
+        
+        if timer_active:
+            timer = threading.Timer(1, update_video_progress_bar)
+            timer.start()
+    
+    def format_time(milliseconds):
+        seconds = int(milliseconds / 1000)
+        minutes = seconds // 60
+        seconds = seconds % 60
+        return f"{minutes:02d}:{seconds:02d}"
+        
+    def handle_progress_change_end(e):
+        # Quando o usuário solta o slider, busca a posição no vídeo
+        total_duration = video.get_duration() or 1
+        target_position = int(e.control.value * total_duration)
+        
+        # Seek to the new position
+        video.seek(target_position)
+        print(f"Video.seek({target_position})")
+        
+        # Update time labels immediately
+        current_time = format_time(target_position)
+        total_time = format_time(total_duration)
+        time_display.value = f"{current_time} / {total_time}"
+        
+        # Update the UI
+        page.update()
+    
+    def handle_play_pause(e):
+        nonlocal timer_active, timer, is_playing
+        
+        if is_playing:
+            # If playing, pause the video
+            video.pause()
+            timer_active = False
+            if timer:
+                timer.cancel()
+            play_pause_button.icon = ft.icons.PLAY_ARROW
+            is_playing = False
+        else:
+            # If paused, play the video
+            video.play()
+            timer_active = True
+            update_video_progress_bar()  # Start updating the progress bar
+            play_pause_button.icon = ft.icons.PAUSE
+            is_playing = True
+        
+        page.update()
+        print(f"Video {'paused' if not is_playing else 'playing'}")
+    
+    # Clean up when closing the app
+    def on_close(e):
+        nonlocal timer_active, timer
+        timer_active = False
+        if timer:
+            timer.cancel()
+        
+    page.on_close = on_close
 
     sample_media = [
         ft.VideoMedia(
             "src/assets/videos/example_01.mp4"
         ),
     ]
+
+    # Create time display text
+    time_display = ft.Text("00:00 / 00:00", size=14)
+    
+    # Create progress slider instead of progress bar
+    progress_slider = ft.Slider(
+        value=0,
+        min=0,
+        max=1,
+        divisions=100,
+        width=400,
+        height=20,
+        on_change_end=handle_progress_change_end,
+    )
+    
+    # Create play/pause button
+    play_pause_button = ft.IconButton(
+        icon=ft.icons.PLAY_ARROW,
+        icon_size=30,
+        on_click=handle_play_pause,
+    )
+    
+    # Video control buttons row
+    video_controls = ft.Row(
+        [play_pause_button],
+        alignment=ft.MainAxisAlignment.CENTER,
+    )
+    
+    # Video progress control container
+    video_progress_control = ft.Container(
+        content=ft.Column([
+            progress_slider,
+            ft.Row(
+                [time_display, video_controls],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                width=400,
+            ),
+        ], 
+        spacing=5,
+        alignment=ft.MainAxisAlignment.CENTER,
+        horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+        padding=10
+    )
 
     page.add(
         video := ft.Video(
@@ -81,22 +169,7 @@ def main(page: ft.Page):
             on_enter_fullscreen=lambda e: print("Video entered fullscreen!"),
             on_exit_fullscreen=lambda e: print("Video exited fullscreen!"),
         ),
-        ft.Row(
-            wrap=True,
-            alignment=ft.MainAxisAlignment.CENTER,
-            controls=[
-                ft.ElevatedButton("Play", on_click=handle_play),
-                ft.ElevatedButton("Pause", on_click=handle_pause),
-                ft.ElevatedButton("Play Or Pause", on_click=handle_play_or_pause),
-                ft.ElevatedButton("Stop", on_click=handle_stop),
-                ft.ElevatedButton("Next", on_click=handle_next),
-                ft.ElevatedButton("Previous", on_click=handle_previous),
-                ft.ElevatedButton("Seek s=10", on_click=handle_seek),
-                ft.ElevatedButton("Jump to first Media", on_click=handle_jump),
-                ft.ElevatedButton("Add Random Media", on_click=handle_add_media),
-                ft.ElevatedButton("Remove Random Media", on_click=handle_remove_media),
-            ],
-        ),
+        video_progress_control,
         ft.Slider(
             min=0,
             value=100,
@@ -116,6 +189,10 @@ def main(page: ft.Page):
             on_change=handle_playback_rate_change,
         ),
     )
+    
+    # Start progress bar update when the app loads
+    # but don't activate the timer since the video starts paused
+    timer_active = False
 
 
 ft.app(main)
