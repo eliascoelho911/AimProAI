@@ -15,6 +15,7 @@ def main(page: ft.Page):
     timer_active = True
     timer = None
     is_playing = False
+    slider_being_dragged = False  # Flag to track if user is dragging the slider
 
     def handle_volume_change(e):
         video.volume = e.control.value
@@ -35,29 +36,54 @@ def main(page: ft.Page):
         current_position = video.get_current_position() or 0
         total_duration = video.get_duration() or 1  # Avoid division by zero
         
-        # Update the progress bar value
-        if total_duration > 0:
+        # Update the progress bar value only if the slider is not being dragged
+        if total_duration > 0 and not slider_being_dragged:
             progress_slider.value = current_position / total_duration
             
         # Update time labels
+        update_time_display(current_position)
+        
+        # Check if video is completed
+        if video.is_completed():
+            handle_play_pause(None)  # Pause the video and timer
+        
+        # Schedule next update using threading.Timer (faster refresh rate)
+        if not slider_being_dragged:
+            progress_slider.update()
+            time_display.update()
+        
+        if timer_active:
+            timer = threading.Timer(0.2, update_video_progress_bar)  # Update 5 times per second
+            timer.start()
+    
+    def update_time_display(current_position):
+        # Update time labels
+        total_duration = video.get_duration() or 1
         current_time = format_time(current_position)
         total_time = format_time(total_duration)
         time_display.value = f"{current_time} / {total_time}"
-        
-        # Schedule next update using threading.Timer
-        page.update()
-        
-        if timer_active:
-            timer = threading.Timer(1, update_video_progress_bar)
-            timer.start()
     
     def format_time(milliseconds):
         seconds = int(milliseconds / 1000)
         minutes = seconds // 60
         seconds = seconds % 60
         return f"{minutes:02d}:{seconds:02d}"
+    
+    def handle_slider_change(e):
+        nonlocal slider_being_dragged
+        slider_being_dragged = True
+        
+        # Update time display while dragging
+        total_duration = video.get_duration() or 1
+        current_position = int(e.control.value * total_duration)
+        update_time_display(current_position)
+        time_display.update()
         
     def handle_progress_change_end(e):
+        nonlocal slider_being_dragged
+        # Reset the flag when slider interaction ends
+        slider_being_dragged = False
+        
         # Quando o usuário solta o slider, busca a posição no vídeo
         total_duration = video.get_duration() or 1
         target_position = int(e.control.value * total_duration)
@@ -67,9 +93,7 @@ def main(page: ft.Page):
         print(f"Video.seek({target_position})")
         
         # Update time labels immediately
-        current_time = format_time(target_position)
-        total_time = format_time(total_duration)
-        time_display.value = f"{current_time} / {total_time}"
+        update_time_display(target_position)
         
         # Update the UI
         page.update()
@@ -122,6 +146,7 @@ def main(page: ft.Page):
         divisions=100,
         width=400,
         height=20,
+        on_change=handle_slider_change,
         on_change_end=handle_progress_change_end,
     )
     
@@ -193,6 +218,9 @@ def main(page: ft.Page):
     # Start progress bar update when the app loads
     # but don't activate the timer since the video starts paused
     timer_active = False
+    
+    # Initialize time display
+    update_time_display(0)
 
 
 ft.app(main)
